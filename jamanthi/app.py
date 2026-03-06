@@ -1,3 +1,5 @@
+import os
+import sys
 from wsgiref.types import StartResponse
 from typing import Any
 from collections.abc import Callable
@@ -28,6 +30,15 @@ class Jamanthi:
         self.routes: dict[str, dict[str, ViewFunc]] = {
             'GET': {},
         }
+        module = sys.modules.get(self.name)
+        module_file = getattr(module, '__file__', None)
+        if module_file:
+            self.root_path = os.path.dirname(os.path.abspath(module_file))
+        else:
+            self.root_path = os.getcwd()
+
+        self.html_path = os.path.join(self.root_path, "html")
+        
         logger.info(f"[Jamanthi] App initialized with name {name}")
 
     # Callable which web servers will call invoke when a request arrives
