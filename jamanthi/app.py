@@ -23,6 +23,12 @@ def not_found(start_response: StartResponse) -> list[bytes]:
     start_response(HTTP_STATUS_MAPPINGS[404], [('Content-Type', 'text/plain')])
     return [b"Page Not Found"]
 
+class Request:
+    def __init__(self, environ: dict[str, Any]) -> None:
+        self._environ = environ
+        self.method = environ.get('REQUEST_METHOD', 'GET')
+        self.path = environ.get('PATH_INFO', '/')
+
 class Jamanthi:
     def __init__(self, name: str) -> None:
         self.name = name
@@ -44,16 +50,17 @@ class Jamanthi:
     # Callable which web servers will call invoke when a request arrives
     def __call__(self, environ: dict[str, Any], start_response: StartResponse) -> list[bytes]:
 
+        self.request = Request(environ)
         status = 200
         content_type = 'text/html'
 
         try:
-            handler = self.find_handler(environ)
+            handler = self.find_handler(self.request)
         except NotFound:
             logger.error(f"[Jamanthi] Handler not registered")
             return not_found(start_response)
 
-        body = handler()
+        body = handler(self.request)
         if isinstance(body, str):
             body = body.encode()
         headers = [('Content-type', content_type)]
@@ -69,15 +76,16 @@ class Jamanthi:
             return handler
         return wrapper
 
-    def find_handler(self, environ: dict[str, Any]) -> ViewFunc:
-        method = environ.get('REQUEST_METHOD', 'GET')
-        path = environ.get('PATH_INFO', '/')
+    def find_handler(self, request: Request) -> ViewFunc:
+        method = request.method
+        path = request.path
         handler = self.routes[method].get(path, None)
         if handler is None:
             logger.error(f"[Jamanthi] Path '{path}' not found for '{method}'")
             raise NotFound(f"[Jamanthi] Path '{path}' not found for '{method}'")
         logger.info(f"[Jamanthi] Handler successfully retrieved for '{method}' and  '{path}'")
         return handler
+
     
     def run(self, host: str = "0.0.0.0", port: int = 8000)->None:
         from wsgiref.simple_server import make_server
