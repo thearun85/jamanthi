@@ -44,6 +44,7 @@ class Jamanthi:
             self.root_path = os.getcwd()
 
         self.html_path = os.path.join(self.root_path, "html")
+        self.static_path = os.path.join(self.root_path, "static")
         
         logger.info(f"[Jamanthi] App initialized with name {name}")
 
@@ -54,20 +55,25 @@ class Jamanthi:
         status = 200
         content_type = 'text/html'
 
-        try:
-            handler = self.find_handler(self.request)
-        except NotFound:
-            logger.error(f"[Jamanthi] Handler not registered")
-            return not_found(start_response)
+        # Handle css files
+        if self.request.path.startswith('/static/'):
+            return self.static_handler(self.request, start_response)
+        else:
+            # Handle custom handlers
+            try:
+                handler = self.find_handler(self.request)
+            except NotFound:
+                logger.error(f"[Jamanthi] Handler not registered")
+                return not_found(start_response)
 
-        body = handler(self.request)
-        if isinstance(body, str):
-            body = body.encode()
-        headers = [('Content-type', content_type)]
-        status_text = HTTP_STATUS_MAPPINGS[status]
-            
-        start_response(status_text, headers)
-        return [body]
+            body = handler(self.request)
+            if isinstance(body, str):
+                body = body.encode()
+            headers = [('Content-type', content_type)]
+            status_text = HTTP_STATUS_MAPPINGS[status]
+                
+            start_response(status_text, headers)
+            return [body]
         
     def get(self, path: str) -> Callable[[ViewFunc], ViewFunc]:
         logger.info(f"[Jamanthi] Handler registered for 'GET' and  '{path}'")
@@ -86,6 +92,18 @@ class Jamanthi:
         logger.info(f"[Jamanthi] Handler successfully retrieved for '{method}' and  '{path}'")
         return handler
 
+    def static_handler(self, request: Request, start_response: StartResponse) -> list[bytes]:
+
+        file_name = request.path[len('/static/'):]
+        file_path = os.path.join(self.static_path, file_name)
+        logger.info(f"[Jamanthi] Static file path is {file_path}")
+        if not os.path.exists(file_path):
+            raise NotFound(f"[Jamanthi] File not found: {file_name}")
+
+        start_response(HTTP_STATUS_MAPPINGS[200], [('Content-Type', 'text/css')])
+        
+        with open(file_path, "rb") as f:
+            return [f.read()]
     
     def run(self, host: str = "0.0.0.0", port: int = 8000)->None:
         from wsgiref.simple_server import make_server
