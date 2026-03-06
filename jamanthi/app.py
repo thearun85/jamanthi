@@ -105,15 +105,67 @@ class Jamanthi:
         with open(file_path, "rb") as f:
             return [f.read()]
     
-    def run(self, host: str = "0.0.0.0", port: int = 8000)->None:
-        from wsgiref.simple_server import make_server
+    def run(self, host: str = "0.0.0.0", port: int = 8000, debug: bool = False)->None:
+    
+        if debug and os.environ.get('JAMANTHI_CHILD', -1) != '1':
+            self._run_with_reloader(host, port)
 
+        else:
+            self._serve(host, port) 
+
+    def _run_with_reloader(self, host: str, port: int) -> None:
+        import subprocess
+        import time
+        
+        env = os.environ.copy()
+        env['JAMANTHI_CHILD'] = '1'
+
+        while True:
+            process = subprocess.Popen(
+                [sys.executable] + sys.argv,
+                env=env
+            )
+            mtimes: dict[str, float] = {}
+            try:
+                while process.poll() is None:
+                    if self._files_changed(mtimes):
+                        print(f"[Jamanthi] Detected file changes. Reloading...")
+                        process.terminate()
+                        process.wait()
+                        break
+                    time.sleep(1)
+                else:
+                    break
+            except KeyboardInterrupt:
+                print(f"[Jamanthi] Shutting down...")
+                process.terminate()
+                process.wait()
+                break
+    
+    def _serve(self, host: str, port: int)->None:
+        from wsgiref.simple_server import make_server
         print(f"* Starting Jamanthi at http://{host}:{port}/")
         print(f"* Press Ctrl+C to force shutdown.")
         srv = make_server(host, port, self)
         
-        try:
-            srv.serve_forever()
-        except KeyboardInterrupt: # Gracefully shutdown using Ctrl+C
-            print(f"[Jamanthi] Shuttinf Down!!")
-            srv.shutdown()
+        srv.serve_forever()
+
+    def _files_changed(self, mtimes: dict[str, float]) -> bool:
+        # Check and return True if files have changed
+        for file in self._watch_files():
+            mtime = os.stat(file).st_mtime
+            if file in mtimes:
+                if mtimes[file] != mtime:
+                    return True
+            mtimes[file] = mtime
+        return False
+            
+    def _watch_files(self) -> list[str]:
+        # Return a list of files that must be watched for changes
+        watched = []
+        for root, dirs, files in os.walk(self.root_path):
+            for file in files:
+                if file.endswith(('.py', '.html', '.css')):
+                    watched.append(os.path.join(root, file))
+
+        return watched

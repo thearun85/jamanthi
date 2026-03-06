@@ -9,4 +9,5 @@ def home(request: Request)->str:
     with open(html_file_path, "r") as f:
         return f.read()
     
-app.run()
+app.run(host="0.0.0.0", port=8000, debug=True)
+
