@@ -8,6 +8,10 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+import time
+
+_SERVER_TOKEN = str(time.time())  
+
 ViewFunc = Callable[..., str|bytes]
 
 # A dict of appropriate HTTP status codes
@@ -15,6 +19,23 @@ HTTP_STATUS_MAPPINGS: dict[int, str] = {
     200: '200 OK',
     404: '404 NOT FOUND',
 }
+
+_RELOAD_SCRIPT = """<script>
+  (function() {
+    let token = null;
+    function poll() {
+      fetch('/__reload__')
+        .then(r => r.text())
+        .then(t => {
+          if (token === null) token = t;
+          else if (token !== t) location.reload();
+          setTimeout(poll, 1000);
+        })
+        .catch(() => setTimeout(poll, 300));
+    }
+    poll();
+  })();
+</script>"""
 
 class NotFound(Exception):
     status = 404
@@ -57,7 +78,11 @@ class Jamanthi:
 
         # Handle css files
         if self.request.path.startswith('/static/'):
-            return self.static_handler(self.request, start_response)
+            return self._static_handler(self.request, start_response)
+            
+        elif self.request.path == '/__reload__':
+            return self._reload_handler(self.request, start_response)
+            
         else:
             # Handle custom handlers
             try:
@@ -67,6 +92,8 @@ class Jamanthi:
                 return not_found(start_response)
 
             body = handler(self.request)
+            if isinstance(body, str) and self.debug:
+                body = body.replace('</body>', _RELOAD_SCRIPT + '</body>')
             if isinstance(body, str):
                 body = body.encode()
             headers = [('Content-type', content_type)]
@@ -92,7 +119,8 @@ class Jamanthi:
         logger.info(f"[Jamanthi] Handler successfully retrieved for '{method}' and  '{path}'")
         return handler
 
-    def static_handler(self, request: Request, start_response: StartResponse) -> list[bytes]:
+    # Serve static files
+    def _static_handler(self, request: Request, start_response: StartResponse) -> list[bytes]:
 
         file_name = request.path[len('/static/'):]
         file_path = os.path.join(self.static_path, file_name)
@@ -104,9 +132,15 @@ class Jamanthi:
         
         with open(file_path, "rb") as f:
             return [f.read()]
+
+    # Reload HTML pages on server restart
+    def _reload_handler(self, request: Request, start_response: StartResponse) -> list[bytes]:
+        start_response('200 OK', [('Content-Type', 'text/plain')])
+        return [_SERVER_TOKEN.encode()]
     
     def run(self, host: str = "0.0.0.0", port: int = 8000, debug: bool = False)->None:
-    
+        self.debug: bool = debug # Preserve the debug flag
+        
         if debug and os.environ.get('JAMANTHI_CHILD', -1) != '1':
             self._run_with_reloader(host, port)
 
